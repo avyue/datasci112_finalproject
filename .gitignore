@@ -1,0 +1,20 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Environment variables
+.env
+
+# Large data files (>100 MiB; git has no size-based ignore, so listed explicitly)
+data/NEWEST_MyLA311_Service_Request_Data_2025_20260524.csv
+data/Outdated/MyLA311_Service_Request_Data_2025_20260325.csv
+
+# Additional large datasets
+data/MyLA311_Cases_March_2025_to_December_2025_20260524.csv
