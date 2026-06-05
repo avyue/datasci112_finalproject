@@ -11,7 +11,7 @@ from pathlib import Path
 import dash
 import pandas as pd
 import plotly.graph_objects as go
-from dash import Input, Output, State, callback, dcc, html
+from dash import Input, Output, Patch, State, callback, dcc, html
 
 # --- constants ---
 
@@ -320,7 +320,10 @@ class MyLA311Layer(MapLayer):
             zip(prec_df["PREC"].astype(int), prec_df["DIVISION"])
         )
 
-        df = pd.read_csv(path, low_memory=False)
+        df = pd.read_csv(
+            path,
+            usecols=["RequestType", "Latitude", "Longitude", "CreatedDate", "ClosedDate", "Anonymous", "PolicePrecinct"],
+        )
         df = df[df["RequestType"] == MYLA311_REQUEST_TYPE]
         df = df.dropna(subset=["Latitude", "Longitude", "CreatedDate"])
         for row in df.itertuples(index=False):
@@ -662,7 +665,7 @@ def _traces_for_markers(
 
 
 def _circle_polygon(
-    lat: float, lon: float, area_sqft: float, n: int = 64
+    lat: float, lon: float, area_sqft: float, n: int = 16
 ) -> tuple[list[float], list[float]]:
     radius_m = math.sqrt(area_sqft * 0.0929 / math.pi)
     dlat = radius_m / 111_000
@@ -691,13 +694,7 @@ def _traces_for_precincts(markers: list[PrecinctMarker]) -> list[go.Scattermap]:
                 name=PrecinctLayer.label,
                 showlegend=(i == 0),
                 legendgroup="precincts",
-                customdata=[[m.name, m.yearly_victim, m.yearly_suspect, m.victim_count + m.suspect_count]] * len(lats),
-                hovertemplate=(
-                    "Station: %{customdata[0]}<br>"
-                    "Yearly homeless-victim crimes: %{customdata[1]}<br>"
-                    "Yearly homeless-suspect crimes: %{customdata[2]}<br>"
-                    "Homeless-related crimes today: %{customdata[3]}<extra></extra>"
-                ),
+                hoverinfo="skip",
             )
         )
         traces.append(
@@ -720,37 +717,70 @@ def _traces_for_precincts(markers: list[PrecinctMarker]) -> list[go.Scattermap]:
     return traces
 
 
-def build_figure(
+DYNAMIC_LAYER_IDS = ["myla311", "lahsa-protocol", "lahsa-immediate", "lahsa-non-displacement"]
+# Trace index layout (fixed):
+#   0–3  : dynamic marker layers (myla311, 3×LAHSA) — updated every tick via Patch()
+#   4+j*2: precinct polygon fill for precinct j (shape static; hoverinfo=skip)
+#   5+j*2: precinct center dot for precinct j (customdata updated every tick via Patch())
+#   46   : shelter markers (fully static)
+_PRECINCT_POLY_START = len(DYNAMIC_LAYER_IDS)  # 4; dot for precinct j is at 4 + j*2 + 1
+
+
+def _empty_marker_trace(layer: MapLayer) -> go.Scattermap:
+    """Placeholder trace for a dynamic layer, populated each tick via Patch()."""
+    if layer.layer_id == "myla311":
+        hovertemplate = (
+            "%{customdata[0]} – %{customdata[1]}<br>"
+            "Precinct: %{customdata[2]}<br>"
+            "Anonymous: %{customdata[3]}<extra></extra>"
+        )
+    else:
+        hovertemplate = (
+            "Created: %{customdata[0]}<br>"
+            "Action date: %{customdata[1]}<br>"
+            "Possible dwellers: %{customdata[2]}<br>"
+            "Precinct: %{customdata[3]}<extra></extra>"
+        )
+    return go.Scattermap(
+        lat=[],
+        lon=[],
+        mode="markers",
+        name=layer.label,
+        showlegend=True,
+        marker=dict(size=MARKER_SIZE, color=layer.color, opacity=MARKER_OPACITY, symbol="circle"),
+        customdata=[],
+        hovertemplate=hovertemplate,
+    )
+
+
+def build_base_figure(
     index: DailyMarkerIndex,
     layers: list[MapLayer],
-    day_idx: int,
     precinct_layer: PrecinctLayer,
     shelter_layer: ShelterLayer,
+    initial_day_idx: int = 0,
 ) -> go.Figure:
-    day = DATE_RANGE[day_idx]
-    traces: list[go.Scattermap] = []
+    day = DATE_RANGE[initial_day_idx]
+    dynamic_traces = []
     for layer in layers:
+        t = _empty_marker_trace(layer)
+        markers = index.get(day, layer.layer_id)
+        t.lat = [m.lat for m in markers]
+        t.lon = [m.lon for m in markers]
         if layer.layer_id == "myla311":
-            fn = _traces_for_myla311
-        elif isinstance(layer, LAHSALayer):
-            fn = _traces_for_lahsa
+            t.customdata = [[m.created_date, m.closed_date, m.precinct, m.anonymous] for m in markers]
         else:
-            fn = _traces_for_markers
-        traces.extend(
-            fn(
-                index.get(day, layer.layer_id),
-                color=layer.color,
-                name=layer.label,
-            )
-        )
+            t.customdata = [[m.created_date, m.closed_date, m.people, m.precinct] for m in markers]
+        dynamic_traces.append(t)
     precinct_traces = _traces_for_precincts(precinct_layer.markers_on(day))
     shelter_traces = _traces_for_shelters(shelter_layer.markers)
-    fig = go.Figure(precinct_traces + shelter_traces + traces)
+    fig = go.Figure(dynamic_traces + precinct_traces + shelter_traces)
     fig.update_layout(
         map=dict(style=MAP_STYLE, center=MAP_CENTER, zoom=MAP_ZOOM),
         margin=dict(l=0, r=0, t=40, b=0),
         title=f"Encampment activity — {day.isoformat()}",
         showlegend=True,
+        uirevision="constant",
     )
     return fig
 
@@ -837,7 +867,7 @@ def build_app(
     shelter_layer: ShelterLayer,
 ) -> dash.Dash:
     app = dash.Dash(__name__)
-    initial_figure = build_figure(index, layers, 0, precinct_layer, shelter_layer)
+    initial_figure = build_base_figure(index, layers, precinct_layer, shelter_layer, initial_day_idx=0)
 
     app.layout = html.Div(
         [
@@ -902,10 +932,28 @@ def build_app(
         Output("date-label", "children"),
         Input("day-slider", "value"),
     )
-    def update_map(day_idx: int) -> tuple[go.Figure, str]:
+    def update_map(day_idx: int) -> tuple[Patch, str]:
         day = DATE_RANGE[day_idx]
-        fig = build_figure(index, layers, day_idx, precinct_layer, shelter_layer)
-        return fig, day.strftime("%B %d, %Y")
+        p = Patch()
+        for i, layer in enumerate(layers):
+            markers = index.get(day, layer.layer_id)
+            p["data"][i]["lat"] = [m.lat for m in markers]
+            p["data"][i]["lon"] = [m.lon for m in markers]
+            if layer.layer_id == "myla311":
+                p["data"][i]["customdata"] = [
+                    [m.created_date, m.closed_date, m.precinct, m.anonymous] for m in markers
+                ]
+            else:
+                p["data"][i]["customdata"] = [
+                    [m.created_date, m.closed_date, m.people, m.precinct] for m in markers
+                ]
+        for j, pm in enumerate(precinct_layer.markers_on(day)):
+            dot_idx = _PRECINCT_POLY_START + j * 2 + 1
+            p["data"][dot_idx]["customdata"] = [
+                [pm.name, pm.yearly_victim, pm.yearly_suspect, pm.victim_count + pm.suspect_count]
+            ]
+        p["layout"]["title"] = f"Encampment activity — {day.isoformat()}"
+        return p, day.strftime("%B %d, %Y")
 
     return app
 
