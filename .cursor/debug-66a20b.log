@@ -1,0 +1,4 @@
+{"sessionId": "66a20b", "runId": "run1", "hypothesisId": "H-B", "location": "map_builder.py:325", "message": "nibrs loaded", "data": {"rows": 19296, "sample_date": "2025 Sep 12 12:00:00 AM"}, "timestamp": 1780561294927}
+{"sessionId": "66a20b", "runId": "run1", "hypothesisId": "H-C", "location": "map_builder.py:330", "message": "before between filter", "data": {"rows_with_date": 19296, "sample_parsed_date": "2025-09-12"}, "timestamp": 1780561294933}
+{"sessionId": "66a20b", "runId": "run1", "hypothesisId": "H-C", "location": "map_builder.py:333", "message": "after between filter", "data": {"rows_in_range": 19184}, "timestamp": 1780561294938}
+{"sessionId": "66a20b", "runId": "run1", "hypothesisId": "H-A", "location": "map_builder.py:356", "message": "precinct load complete", "data": {"days_indexed": 365, "sample_day": "2025-01-01", "markers_on_day0": 21, "first_marker": {"name": "HARBOR", "v": 1, "s": 0}}, "timestamp": 1780561295031}

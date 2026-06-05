@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -16,10 +17,12 @@ from dash import Input, Output, State, callback, dcc, html
 
 DATA_DIR = Path(__file__).parent / "data"
 MYLA311_PATH = (
-    DATA_DIR / "MyLA311_Service_Request_Homeless_Encampment_Combined_2025_20260524.csv"
+    DATA_DIR / "MyLA311" / "MyLA311_Service_Request_Homeless_Encampment_Combined_2025_20260524.csv"
 )
 MYLA311_REQUEST_TYPE = "Homeless Encampment"
-LAHSA_PATH = DATA_DIR / "LA_County_Homeless_Encampment_Request_Forms.csv"
+LAHSA_PATH = DATA_DIR / "LAHSA" / "LA_County_Homeless_Encampment_Request_Forms_with_precinct.csv"
+NIBRS_PATH = DATA_DIR / "LAPD" / "LAPD_NIBRS_Offenses_Dataset_2024_to_2025_20260526.csv"
+PRECINCT_PATH = DATA_DIR / "LAPD" / "lapd_precincts_combined.csv"
 
 START_DATE = date(2025, 1, 1)
 END_DATE = date(2025, 12, 31)
@@ -38,6 +41,7 @@ MAP_STYLE = "open-street-map"
 
 LAYER_COLORS = {
     "myla311": "#2563eb",
+    "precincts": "#f59e0b",
 }
 
 LAHSA_ACTION_LAYERS = [
@@ -51,7 +55,7 @@ LAHSA_ACTION_LAYERS = [
         "action_type": "Immediate Action",
         "layer_id": "lahsa-immediate",
         "label": "Immediate Action",
-        "color": "#ea580c",
+        "color": "#0891b2",
     },
     {
         "action_type": "Non-Displacement",
@@ -83,6 +87,15 @@ LEGEND_ENTRIES = [
         }
         for spec in LAHSA_ACTION_LAYERS
     ],
+    {
+        "marker": "Amber star",
+        "color": LAYER_COLORS["precincts"],
+        "label": "LAPD Precinct stations",
+        "description": (
+            "Daily count of NIBRS crimes with a homeless victim or homeless suspect "
+            "in each precinct."
+        ),
+    },
 ]
 
 
@@ -117,10 +130,32 @@ def clip_range(start: date, end: date) -> tuple[date, date]:
     return visible_start, visible_end
 
 
-def hover_lines(people: str, hazards: str, scheduled: str) -> str:
+def _normalize_precinct(value: object, prec_lookup: dict[int, str]) -> str:
+    """Map PolicePrecinct to a division name.
+
+    MyLA311 encodes precincts as either a text name ('CENTRAL') or a numeric
+    precinct number ('1.0'). Numeric values are resolved via the PREC→DIVISION
+    lookup built from lapd_precincts_combined.csv.
+    """
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return NA
+    text = str(value).strip()
+    if not text:
+        return NA
+    try:
+        prec_num = int(float(text))
+        # 0 is not a valid LAPD precinct number
+        if prec_num == 0:
+            return NA
+        return prec_lookup.get(prec_num, text)
+    except ValueError:
+        return text
+
+
+def hover_lines(people: str, precinct: str, scheduled: str) -> str:
     return (
         f"People: {people}<br>"
-        f"Hazards: {hazards}<br>"
+        f"Precinct: {precinct}<br>"
         f"Scheduled action: {scheduled}"
     )
 
@@ -134,8 +169,20 @@ class Marker:
     lon: float
     opacity: float
     people: str
-    hazards: str
+    precinct: str
     scheduled: str
+
+
+@dataclass(frozen=True)
+class PrecinctMarker:
+    lat: float
+    lon: float
+    name: str
+    area: float
+    victim_count: int
+    suspect_count: int
+    yearly_victim: int
+    yearly_suspect: int
 
 
 class MapLayer(ABC):
@@ -161,6 +208,11 @@ class MyLA311Layer(MapLayer):
         self._by_date: dict[date, list[Marker]] = {}
 
     def load(self, path: Path) -> None:
+        prec_df = pd.read_csv(PRECINCT_PATH, usecols=["PREC", "DIVISION"])
+        prec_lookup: dict[int, str] = dict(
+            zip(prec_df["PREC"].astype(int), prec_df["DIVISION"])
+        )
+
         df = pd.read_csv(path, low_memory=False)
         df = df[df["RequestType"] == MYLA311_REQUEST_TYPE]
         df = df.dropna(subset=["Latitude", "Longitude", "CreatedDate"])
@@ -174,7 +226,7 @@ class MyLA311Layer(MapLayer):
                 lon=float(row.Longitude),
                 opacity=MARKER_OPACITY,
                 people=NA,
-                hazards=NA,
+                precinct=_normalize_precinct(row.PolicePrecinct, prec_lookup),
                 scheduled=scheduled,
             )
             self._by_date.setdefault(day, []).append(marker)
@@ -192,7 +244,7 @@ class _LAHSARow:
     visible_end: date
     action_type: str
     people: str
-    hazards: str
+    precinct: str
     scheduled: str
 
 
@@ -236,10 +288,6 @@ class LAHSALayer(MapLayer):
                 action_date = None
                 visible_end = END_DATE
 
-            hazards = fmt(row.REQUESTCOMPLETEDNOTE)
-            if hazards == NA:
-                hazards = fmt(row.ADDRESS)
-
             self._rows.append(
                 _LAHSARow(
                     lat=float(row.Y),
@@ -249,7 +297,7 @@ class LAHSALayer(MapLayer):
                     visible_end=visible_end,
                     action_type=row_action,
                     people=fmt(row.POSSIBLEDWELLERS),
-                    hazards=hazards,
+                    precinct=fmt(row.PolicePrecinct),
                     scheduled=scheduled,
                 )
             )
@@ -268,7 +316,7 @@ class LAHSALayer(MapLayer):
                         lon=row.lon,
                         opacity=MARKER_OPACITY,
                         people=row.people,
-                        hazards=row.hazards,
+                        precinct=row.precinct,
                         scheduled=row.scheduled,
                     )
                 )
@@ -286,6 +334,72 @@ class DailyMarkerIndex:
 
     def get(self, day: date, layer_id: str) -> list[Marker]:
         return self._data.get(day, {}).get(layer_id, [])
+
+
+class PrecinctLayer:
+    layer_id = "precincts"
+    label = "LAPD Precinct stations"
+    color = LAYER_COLORS["precincts"]
+
+    def __init__(self) -> None:
+        self._by_date: dict[date, list[PrecinctMarker]] = {}
+
+    def load(self, precinct_path: Path, nibrs_path: Path) -> None:
+        precincts = pd.read_csv(precinct_path)
+        loc: dict[int, tuple[float, float, str, float]] = {
+            int(row.PREC): (float(row.lat), float(row.lon), str(row.DIVISION), float(row.Shape__Area))
+            for row in precincts.itertuples(index=False)
+        }
+
+        nibrs = pd.read_csv(nibrs_path, low_memory=False)
+        nibrs = nibrs.dropna(subset=["Date OCC", "AREA"])
+        nibrs["_date"] = pd.to_datetime(
+            nibrs["Date OCC"], format="%Y %b %d %I:%M:%S %p"
+        ).dt.date
+        nibrs["_area"] = pd.to_numeric(nibrs["AREA"], errors="coerce")
+        nibrs = nibrs[
+            nibrs["_date"].between(START_DATE, END_DATE) & nibrs["_area"].notna()
+        ]
+        nibrs["_area"] = nibrs["_area"].astype(int)
+        nibrs["_victim"] = nibrs["Homeless-Victim Crime"] == "Yes"
+        nibrs["_suspect"] = nibrs["Homeless-Suspect Crime"] == "Yes"
+
+        grouped = (
+            nibrs.groupby(["_date", "_area"])[["_victim", "_suspect"]]
+            .sum()
+            .rename(columns={"_victim": "v", "_suspect": "s"})
+        )
+        counts: dict[date, dict[int, tuple[int, int]]] = {}
+        for (day, prec), row in grouped.iterrows():
+            counts.setdefault(day, {})[int(prec)] = (int(row.v), int(row.s))
+
+        yearly = (
+            nibrs.groupby("_area")[["_victim", "_suspect"]]
+            .sum()
+            .rename(columns={"_victim": "v", "_suspect": "s"})
+        )
+        yearly_totals: dict[int, tuple[int, int]] = {
+            int(prec): (int(row.v), int(row.s)) for prec, row in yearly.iterrows()
+        }
+
+        for day in DATE_RANGE:
+            day_counts = counts.get(day, {})
+            self._by_date[day] = [
+                PrecinctMarker(
+                    lat=lat,
+                    lon=lon,
+                    name=name,
+                    area=area,
+                    victim_count=day_counts.get(prec, (0, 0))[0],
+                    suspect_count=day_counts.get(prec, (0, 0))[1],
+                    yearly_victim=yearly_totals.get(prec, (0, 0))[0],
+                    yearly_suspect=yearly_totals.get(prec, (0, 0))[1],
+                )
+                for prec, (lat, lon, name, area) in loc.items()
+            ]
+
+    def markers_on(self, day: date) -> list[PrecinctMarker]:
+        return self._by_date.get(day, [])
 
 
 def _traces_for_markers(
@@ -306,20 +420,80 @@ def _traces_for_markers(
                 opacity=MARKER_OPACITY,
                 symbol="circle",
             ),
-            customdata=[[m.people, m.hazards, m.scheduled] for m in markers],
+            customdata=[[m.people, m.precinct, m.scheduled] for m in markers],
             hovertemplate=(
                 "People: %{customdata[0]}<br>"
-                "Hazards: %{customdata[1]}<br>"
+                "Precinct: %{customdata[1]}<br>"
                 "Scheduled action: %{customdata[2]}<extra></extra>"
             ),
         )
     ]
 
 
+def _circle_polygon(
+    lat: float, lon: float, area_sqft: float, n: int = 64
+) -> tuple[list[float], list[float]]:
+    radius_m = math.sqrt(area_sqft * 0.0929 / math.pi)
+    dlat = radius_m / 111_000
+    dlon = radius_m / (111_000 * math.cos(math.radians(lat)))
+    angles = [2 * math.pi * i / n for i in range(n + 1)]
+    return (
+        [lat + dlat * math.sin(a) for a in angles],
+        [lon + dlon * math.cos(a) for a in angles],
+    )
+
+
+def _traces_for_precincts(markers: list[PrecinctMarker]) -> list[go.Scattermap]:
+    if not markers:
+        return []
+    traces = []
+    for i, m in enumerate(markers):
+        lats, lons = _circle_polygon(m.lat, m.lon, m.area)
+        traces.append(
+            go.Scattermap(
+                lat=lats,
+                lon=lons,
+                mode="lines",
+                fill="toself",
+                fillcolor="rgba(245, 158, 11, 0.25)",
+                line=dict(color="#f59e0b", width=1),
+                name=PrecinctLayer.label,
+                showlegend=(i == 0),
+                legendgroup="precincts",
+                customdata=[[m.name, m.yearly_victim, m.yearly_suspect, m.victim_count + m.suspect_count]] * len(lats),
+                hovertemplate=(
+                    "Station: %{customdata[0]}<br>"
+                    "Yearly homeless-victim crimes: %{customdata[1]}<br>"
+                    "Yearly homeless-suspect crimes: %{customdata[2]}<br>"
+                    "Homeless-related crimes today: %{customdata[3]}<extra></extra>"
+                ),
+            )
+        )
+        traces.append(
+            go.Scattermap(
+                lat=[m.lat],
+                lon=[m.lon],
+                mode="markers",
+                marker=dict(size=6, color="#f59e0b", opacity=1.0),
+                showlegend=False,
+                legendgroup="precincts",
+                customdata=[[m.name, m.yearly_victim, m.yearly_suspect, m.victim_count + m.suspect_count]],
+                hovertemplate=(
+                    "Station: %{customdata[0]}<br>"
+                    "Yearly homeless-victim crimes: %{customdata[1]}<br>"
+                    "Yearly homeless-suspect crimes: %{customdata[2]}<br>"
+                    "Homeless-related crimes today: %{customdata[3]}<extra></extra>"
+                ),
+            )
+        )
+    return traces
+
+
 def build_figure(
     index: DailyMarkerIndex,
     layers: list[MapLayer],
     day_idx: int,
+    precinct_layer: PrecinctLayer,
 ) -> go.Figure:
     day = DATE_RANGE[day_idx]
     traces: list[go.Scattermap] = []
@@ -331,8 +505,8 @@ def build_figure(
                 name=layer.label,
             )
         )
-
-    fig = go.Figure(traces)
+    precinct_traces = _traces_for_precincts(precinct_layer.markers_on(day))
+    fig = go.Figure(precinct_traces + traces)
     fig.update_layout(
         map=dict(style=MAP_STYLE, center=MAP_CENTER, zoom=MAP_ZOOM),
         margin=dict(l=0, r=0, t=40, b=0),
@@ -405,9 +579,11 @@ def build_layers() -> list[MapLayer]:
     return layers
 
 
-def build_app(index: DailyMarkerIndex, layers: list[MapLayer]) -> dash.Dash:
+def build_app(
+    index: DailyMarkerIndex, layers: list[MapLayer], precinct_layer: PrecinctLayer
+) -> dash.Dash:
     app = dash.Dash(__name__)
-    initial_figure = build_figure(index, layers, 0)
+    initial_figure = build_figure(index, layers, 0, precinct_layer)
 
     app.layout = html.Div(
         [
@@ -474,7 +650,7 @@ def build_app(index: DailyMarkerIndex, layers: list[MapLayer]) -> dash.Dash:
     )
     def update_map(day_idx: int) -> tuple[go.Figure, str]:
         day = DATE_RANGE[day_idx]
-        fig = build_figure(index, layers, day_idx)
+        fig = build_figure(index, layers, day_idx, precinct_layer)
         return fig, day.strftime("%B %d, %Y")
 
     return app
@@ -483,7 +659,9 @@ def build_app(index: DailyMarkerIndex, layers: list[MapLayer]) -> dash.Dash:
 def main() -> None:
     layers = build_layers()
     index = DailyMarkerIndex(layers)
-    app = build_app(index, layers)
+    precinct_layer = PrecinctLayer()
+    precinct_layer.load(PRECINCT_PATH, NIBRS_PATH)
+    app = build_app(index, layers, precinct_layer)
     print(f"Serving map at http://127.0.0.1:8050 ({len(DATE_RANGE)} days indexed)")
     app.run(host="127.0.0.1", port=8050, debug=False)
 
