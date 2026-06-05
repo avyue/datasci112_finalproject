@@ -23,6 +23,7 @@ MYLA311_REQUEST_TYPE = "Homeless Encampment"
 LAHSA_PATH = DATA_DIR / "LAHSA" / "LA_County_Homeless_Encampment_Request_Forms_with_precinct.csv"
 NIBRS_PATH = DATA_DIR / "LAPD" / "LAPD_NIBRS_Offenses_Dataset_2024_to_2025_20260526.csv"
 PRECINCT_PATH = DATA_DIR / "LAPD" / "lapd_precincts_combined.csv"
+SHELTER_PATH = DATA_DIR / "shelters" / "2025_HIC_All_Projects.csv"
 
 START_DATE = date(2025, 1, 1)
 END_DATE = date(2025, 12, 31)
@@ -42,6 +43,90 @@ MAP_STYLE = "open-street-map"
 LAYER_COLORS = {
     "myla311": "#2563eb",
     "precincts": "#f59e0b",
+    "shelters": "#000000",
+}
+
+# City-centroid lookup for shelter geocoding (HIC data has no lat/lon)
+CITY_COORDS: dict[str, tuple[float, float] | None] = {
+    "Alhambra": (34.0953, -118.1270),
+    "Altadena": (34.1900, -118.1310),
+    "Arcadia": (34.1397, -118.0353),
+    "Azusa": (34.1336, -117.9076),
+    "Baldwin Park": (34.0853, -117.9609),
+    "Bell": (33.9775, -118.1870),
+    "Bellflower": (33.8817, -118.1170),
+    "Burbank": (34.1808, -118.3090),
+    "Canoga Park": (34.2008, -118.5988),
+    "Canyon Country": (34.4218, -118.4642),
+    "Chatsworth": (34.2573, -118.6039),
+    "CONFIDENTIAL": None,
+    "Compton": (33.8958, -118.2201),
+    "Covina": (34.0900, -117.8903),
+    "Culver City": (34.0211, -118.3965),
+    "Downey": (33.9401, -118.1331),
+    "Duarte": (34.1392, -117.9776),
+    "East Los Angeles CDP": (34.0239, -118.1717),
+    "El Monte": (34.0686, -118.0276),
+    "Gardena": (33.8883, -118.3089),
+    "Hacienda Heights": (33.9931, -117.9690),
+    "Harbor City": (33.7928, -118.2943),
+    "Hawthorne": (33.9164, -118.3526),
+    "Huntington Park": (33.9814, -118.2254),
+    "Ingelwood": (33.9617, -118.3531),
+    "Inglewood": (33.9617, -118.3531),
+    "Irwindale": (34.1064, -117.9359),
+    "La Puente": (34.0200, -117.9498),
+    "La Verne": (34.1006, -117.7678),
+    "Lancaster": (34.6868, -118.1542),
+    "Lawndale": (33.8872, -118.3526),
+    "Long Beach": (33.7701, -118.1937),
+    "Los Angeles": (34.0522, -118.2437),
+    "Los angeles": (34.0522, -118.2437),
+    "los angeles": (34.0522, -118.2437),
+    "Lynwood": (33.9303, -118.2112),
+    "Marina Del Rey": (33.9802, -118.4517),
+    "Mission HIlls": (34.2736, -118.4642),
+    "Monrovia": (34.1442, -117.9995),
+    "Montebello": (34.0153, -118.1137),
+    "Newhall": (34.3842, -118.5301),
+    "North Hills": (34.2342, -118.4842),
+    "North Hollywood": (34.1872, -118.3830),
+    "Northridge": (34.2289, -118.5342),
+    "Norwalk": (33.9022, -118.0815),
+    "Pacoima": (34.2597, -118.4087),
+    "Palmadale": (34.5794, -118.1165),
+    "Palmdale": (34.5794, -118.1165),
+    "Panorama City": (34.2233, -118.4467),
+    "Pomona": (34.0551, -117.7490),
+    "Quartz Hills": (34.6489, -118.2154),
+    "Redondo Beach": (33.8492, -118.3884),
+    "Reseda": (34.2014, -118.5342),
+    "Rosemead": (34.0803, -118.0728),
+    "San Fernando": (34.2819, -118.4392),
+    "San Gabriel": (34.0961, -118.1059),
+    "San Pedro": (33.7367, -118.2912),
+    "Santa Clarita": (34.3917, -118.5426),
+    "Santa Fe Springs": (33.9428, -118.0687),
+    "Santa Monica": (34.0195, -118.4912),
+    "Sherman Oaks": (34.1511, -118.4494),
+    "Signal Hill": (33.8042, -118.1665),
+    "South El Monte": (34.0525, -118.0462),
+    "South Gate": (33.9547, -118.2122),
+    "Sun Valley": (34.2219, -118.3830),
+    "Sunland": (34.2614, -118.3094),
+    "Sylmar": (34.2994, -118.4442),
+    "Tarzana": (34.1689, -118.5494),
+    "Torrance": (33.8358, -118.3406),
+    "Tujunga": (34.2494, -118.2894),
+    "Van Nuys": (34.1897, -118.4494),
+    "Venice": (33.9850, -118.4694),
+    "West Athens CDP": (33.9058, -118.2965),
+    "West Covina": (34.0686, -117.9390),
+    "West Hollywood": (34.0900, -118.3614),
+    "Whittier": (33.9792, -118.0326),
+    "Wilmington": (33.7817, -118.2612),
+    "Winnetka": (34.2139, -118.5694),
+    "Woodland Hills": (34.1683, -118.5994),
 }
 
 LAHSA_ACTION_LAYERS = [
@@ -94,6 +179,16 @@ LEGEND_ENTRIES = [
         "description": (
             "Daily count of NIBRS crimes with a homeless victim or homeless suspect "
             "in each precinct."
+        ),
+    },
+    {
+        "marker": "Black triangle",
+        "color": "#000000",
+        "shape": "triangle",
+        "label": "Homeless shelters (2025 HIC)",
+        "description": (
+            "HUD Housing Inventory Count shelter locations. "
+            "Coordinates are city-level centroids."
         ),
     },
 ]
@@ -171,6 +266,9 @@ class Marker:
     people: str
     precinct: str
     scheduled: str
+    created_date: str = ""
+    closed_date: str = ""
+    anonymous: str = ""
 
 
 @dataclass(frozen=True)
@@ -183,6 +281,15 @@ class PrecinctMarker:
     suspect_count: int
     yearly_victim: int
     yearly_suspect: int
+
+
+@dataclass(frozen=True)
+class ShelterMarker:
+    lat: float
+    lon: float
+    name: str
+    total_beds: str
+    housing_type: str
 
 
 class MapLayer(ABC):
@@ -220,14 +327,21 @@ class MyLA311Layer(MapLayer):
             day = to_la_date(row.CreatedDate)
             if day is None or day < START_DATE or day > END_DATE:
                 continue
-            scheduled = fmt(row.ServiceDate) if pd.notna(row.ServiceDate) else NA
+            created = day.strftime("%m/%d/%Y")
+            closed_raw = row.ClosedDate if pd.notna(row.ClosedDate) else None
+            closed = to_la_date(closed_raw).strftime("%m/%d/%Y") if closed_raw else NA
+            anon_val = str(row.Anonymous).strip().upper() if pd.notna(row.Anonymous) else "N"
+            anonymous = "Yes" if anon_val in ("Y", "YES", "TRUE", "1") else "No"
             marker = Marker(
                 lat=float(row.Latitude),
                 lon=float(row.Longitude),
                 opacity=MARKER_OPACITY,
                 people=NA,
                 precinct=_normalize_precinct(row.PolicePrecinct, prec_lookup),
-                scheduled=scheduled,
+                scheduled=NA,
+                created_date=created,
+                closed_date=closed,
+                anonymous=anonymous,
             )
             self._by_date.setdefault(day, []).append(marker)
 
@@ -308,6 +422,7 @@ class LAHSALayer(MapLayer):
             visible_start, visible_end = clip_range(row.start, row.visible_end)
             if visible_start > visible_end:
                 continue
+            action = row.action_date.strftime("%m/%d/%Y") if row.action_date else NA
             day = visible_start
             while day <= visible_end:
                 self._by_date.setdefault(day, []).append(
@@ -318,6 +433,8 @@ class LAHSALayer(MapLayer):
                         people=row.people,
                         precinct=row.precinct,
                         scheduled=row.scheduled,
+                        created_date=row.start.strftime("%m/%d/%Y"),
+                        closed_date=action,
                     )
                 )
                 day += timedelta(days=1)
@@ -400,6 +517,120 @@ class PrecinctLayer:
 
     def markers_on(self, day: date) -> list[PrecinctMarker]:
         return self._by_date.get(day, [])
+
+
+class ShelterLayer:
+    layer_id = "shelters"
+    label = "Homeless shelters (2025 HIC)"
+    color = LAYER_COLORS["shelters"]
+
+    def __init__(self) -> None:
+        self._markers: list[ShelterMarker] = []
+
+    def load(self, path: Path) -> None:
+        df = pd.read_csv(path)
+        df = df.dropna(subset=["Total Beds", "Project Name", "City"])
+        for _, row in df.iterrows():
+            city = str(row["City"]).strip()
+            coords = CITY_COORDS.get(city)
+            if coords is None:
+                continue
+            lat, lon = coords
+            self._markers.append(
+                ShelterMarker(
+                    lat=lat,
+                    lon=lon,
+                    name=fmt(row["Project Name"]),
+                    total_beds=str(int(row["Total Beds"])),
+                    housing_type=fmt(row["Housing Type"]),
+                )
+            )
+
+    @property
+    def markers(self) -> list[ShelterMarker]:
+        return self._markers
+
+
+def _traces_for_shelters(markers: list[ShelterMarker]) -> list[go.Scattermap]:
+    if not markers:
+        return []
+    return [
+        go.Scattermap(
+            lat=[m.lat for m in markers],
+            lon=[m.lon for m in markers],
+            mode="markers",
+            name=ShelterLayer.label,
+            showlegend=True,
+            marker=dict(
+                size=10,
+                color=ShelterLayer.color,
+                opacity=1.0,
+                symbol="triangle",
+            ),
+            customdata=[[m.name, m.total_beds, m.housing_type] for m in markers],
+            hovertemplate=(
+                "Name: %{customdata[0]}<br>"
+                "Total beds: %{customdata[1]}<br>"
+                "Housing type: %{customdata[2]}<extra></extra>"
+            ),
+        )
+    ]
+
+
+def _traces_for_lahsa(markers: list[Marker], *, color: str, name: str) -> list[go.Scattermap]:
+    if not markers:
+        return []
+    return [
+        go.Scattermap(
+            lat=[m.lat for m in markers],
+            lon=[m.lon for m in markers],
+            mode="markers",
+            name=name,
+            showlegend=True,
+            marker=dict(
+                size=MARKER_SIZE,
+                color=color,
+                opacity=MARKER_OPACITY,
+                symbol="circle",
+            ),
+            customdata=[
+                [m.created_date, m.closed_date, m.people, m.precinct]
+                for m in markers
+            ],
+            hovertemplate=(
+                "Created: %{customdata[0]}<br>"
+                "Action date: %{customdata[1]}<br>"
+                "Possible dwellers: %{customdata[2]}<br>"
+                "Precinct: %{customdata[3]}<extra></extra>"
+            ),
+        )
+    ]
+
+
+def _traces_for_myla311(markers: list[Marker], *, color: str, name: str) -> list[go.Scattermap]:
+    if not markers:
+        return []
+    return [
+        go.Scattermap(
+            lat=[m.lat for m in markers],
+            lon=[m.lon for m in markers],
+            mode="markers",
+            name=name,
+            showlegend=True,
+            marker=dict(
+                size=MARKER_SIZE,
+                color=color,
+                opacity=MARKER_OPACITY,
+                symbol="circle",
+            ),
+            customdata=[[m.created_date, m.closed_date, m.precinct, m.anonymous] for m in markers],
+            hovertemplate=(
+                "%{customdata[0]} – %{customdata[1]}<br>"
+                "Precinct: %{customdata[2]}<br>"
+                "Anonymous: %{customdata[3]}<extra></extra>"
+            ),
+        )
+    ]
 
 
 def _traces_for_markers(
@@ -494,19 +725,27 @@ def build_figure(
     layers: list[MapLayer],
     day_idx: int,
     precinct_layer: PrecinctLayer,
+    shelter_layer: ShelterLayer,
 ) -> go.Figure:
     day = DATE_RANGE[day_idx]
     traces: list[go.Scattermap] = []
     for layer in layers:
+        if layer.layer_id == "myla311":
+            fn = _traces_for_myla311
+        elif isinstance(layer, LAHSALayer):
+            fn = _traces_for_lahsa
+        else:
+            fn = _traces_for_markers
         traces.extend(
-            _traces_for_markers(
+            fn(
                 index.get(day, layer.layer_id),
                 color=layer.color,
                 name=layer.label,
             )
         )
     precinct_traces = _traces_for_precincts(precinct_layer.markers_on(day))
-    fig = go.Figure(precinct_traces + traces)
+    shelter_traces = _traces_for_shelters(shelter_layer.markers)
+    fig = go.Figure(precinct_traces + shelter_traces + traces)
     fig.update_layout(
         map=dict(style=MAP_STYLE, center=MAP_CENTER, zoom=MAP_ZOOM),
         margin=dict(l=0, r=0, t=40, b=0),
@@ -520,16 +759,28 @@ def build_figure(
 
 
 def _legend_entry_row(entry: dict) -> html.Div:
-    marker_preview = html.Span(
-        style={
-            "display": "inline-block",
-            "width": "14px",
-            "height": "14px",
-            "borderRadius": "50%",
-            "backgroundColor": entry["color"],
-            "opacity": MARKER_OPACITY,
-        }
-    )
+    if entry.get("shape") == "triangle":
+        marker_preview = html.Span(
+            style={
+                "display": "inline-block",
+                "width": "0",
+                "height": "0",
+                "borderLeft": "7px solid transparent",
+                "borderRight": "7px solid transparent",
+                "borderBottom": f"14px solid {entry['color']}",
+            }
+        )
+    else:
+        marker_preview = html.Span(
+            style={
+                "display": "inline-block",
+                "width": "14px",
+                "height": "14px",
+                "borderRadius": "50%",
+                "backgroundColor": entry["color"],
+                "opacity": MARKER_OPACITY,
+            }
+        )
     return html.Div(
         [
             html.Div(marker_preview, style={"width": "28px", "flexShrink": "0"}),
@@ -580,10 +831,13 @@ def build_layers() -> list[MapLayer]:
 
 
 def build_app(
-    index: DailyMarkerIndex, layers: list[MapLayer], precinct_layer: PrecinctLayer
+    index: DailyMarkerIndex,
+    layers: list[MapLayer],
+    precinct_layer: PrecinctLayer,
+    shelter_layer: ShelterLayer,
 ) -> dash.Dash:
     app = dash.Dash(__name__)
-    initial_figure = build_figure(index, layers, 0, precinct_layer)
+    initial_figure = build_figure(index, layers, 0, precinct_layer, shelter_layer)
 
     app.layout = html.Div(
         [
@@ -650,7 +904,7 @@ def build_app(
     )
     def update_map(day_idx: int) -> tuple[go.Figure, str]:
         day = DATE_RANGE[day_idx]
-        fig = build_figure(index, layers, day_idx, precinct_layer)
+        fig = build_figure(index, layers, day_idx, precinct_layer, shelter_layer)
         return fig, day.strftime("%B %d, %Y")
 
     return app
@@ -661,7 +915,9 @@ def main() -> None:
     index = DailyMarkerIndex(layers)
     precinct_layer = PrecinctLayer()
     precinct_layer.load(PRECINCT_PATH, NIBRS_PATH)
-    app = build_app(index, layers, precinct_layer)
+    shelter_layer = ShelterLayer()
+    shelter_layer.load(SHELTER_PATH)
+    app = build_app(index, layers, precinct_layer, shelter_layer)
     print(f"Serving map at http://127.0.0.1:8050 ({len(DATE_RANGE)} days indexed)")
     app.run(host="127.0.0.1", port=8050, debug=False)
 
