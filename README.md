@@ -1,3 +1,12 @@
+---
+title: LA Homeless Outreach Map
+emoji: 🗺️
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+---
+
 # datasci112_finalproject
 
 ## The Data </br>
