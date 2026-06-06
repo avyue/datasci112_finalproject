@@ -806,6 +806,7 @@ def build_base_figure(
         map=dict(style=MAP_STYLE, center=MAP_CENTER, zoom=MAP_ZOOM),
         margin=dict(l=0, r=0, t=0, b=0),
         showlegend=True,
+        legend=dict(x=0.01, y=0.99, xanchor="left", yanchor="top", bgcolor="rgba(255,255,255,0.8)"),
         uirevision="constant",
     )
     return fig
