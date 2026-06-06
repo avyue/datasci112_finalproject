@@ -23,6 +23,7 @@ MYLA311_REQUEST_TYPE = "Homeless Encampment"
 LAHSA_PATH = DATA_DIR / "LAHSA" / "LA_County_Homeless_Encampment_Request_Forms_with_precinct.csv"
 NIBRS_PATH = DATA_DIR / "LAPD" / "LAPD_NIBRS_Offenses_Dataset_2024_to_2025_20260526.csv"
 PRECINCT_PATH = DATA_DIR / "LAPD" / "lapd_precincts_combined.csv"
+QCT_BY_PREC_PATH = DATA_DIR / "census_indicators" / "qct_by_prec.csv"
 SHELTER_PATH = DATA_DIR / "shelters" / "2025_HIC_All_Projects.csv"
 
 START_DATE = date(2025, 1, 1)
@@ -135,18 +136,33 @@ LAHSA_ACTION_LAYERS = [
         "layer_id": "lahsa-protocol",
         "label": "Full Protocol",
         "color": "#dc2626",
+        "description": (
+            "Site assessment, intensive outreach, and individuals matched with housing solutions. "
+            "The site is then cleared, cleaned, and secured to prevent future encampments."
+        ),
+        "link": "https://cd10.lacity.gov/sites/g/files/wph1986/files/2021-07/Best-Practices-for-Addressing-Street-Encampments-%E2%80%93-Final-Draft-3.pdf",
     },
     {
         "action_type": "Immediate Action",
         "layer_id": "lahsa-immediate",
         "label": "Immediate Action",
         "color": "#0891b2",
+        "description": (
+            "No information available, but presumably this protocol matches cases where all individuals "
+            "and belongings are cleared from the site within three days due to health or safety hazards."
+        ),
+        "link": "https://www.hiltonfoundation.org/wp-content/uploads/2023/03/Encampments-Brief_Abt-Associates_3.28.23_FINAL-1.pdf",
     },
     {
         "action_type": "Non-Displacement",
         "layer_id": "lahsa-non-displacement",
         "label": "Non-Displacement",
         "color": "#7c3aed",
+        "description": (
+            "No intermediate housing available. Debris is cleared, and only personal property "
+            "voluntarily relinquished is removed. Dwellings are not removed."
+        ),
+        "link": "https://file.lacounty.gov/SDSInter/lac/1183858_LACountyEncampmentResolutionGuidance.pdf",
     },
 ]
 
@@ -155,20 +171,20 @@ LEGEND_ENTRIES = [
         "marker": "Blue circle",
         "color": LAYER_COLORS["myla311"],
         "label": "MyLA311 reported encampments",
+        "link": "https://lacity.gov/myla311/myla311-frequently-asked-questions",
         "description": (
-            "A 311 report filed on this date at this location. "
-            "Shown only on the report date."
+            "A report filed by a resident, business, or worker to MyLA311 to request city services "
+            "to clear an encampment within the jurisdiction of the city of LA. "
+            "Shown at the reported location and on the date filed."
         ),
     },
     *[
         {
             "marker": f"{spec['label']} circle",
             "color": spec["color"],
-            "label": f"LAHSA — {spec['label']}",
-            "description": (
-                "An active LAHSA outreach site from report date through the "
-                "recorded action date."
-            ),
+            "label": f"LAHSA \u2014 {spec['label']}",
+            "link": spec["link"],
+            "description": spec["description"],
         }
         for spec in LAHSA_ACTION_LAYERS
     ],
@@ -176,9 +192,10 @@ LEGEND_ENTRIES = [
         "marker": "Amber star",
         "color": LAYER_COLORS["precincts"],
         "label": "LAPD Precinct stations",
+        "link": "https://lapdonlinestrgeacc.blob.core.usgovcloudapi.net/lapdonlinemedia/2021/12/LAPD-Area-Stations.pdf",
         "description": (
-            "Daily count of NIBRS crimes with a homeless victim or homeless suspect "
-            "in each precinct."
+            "The location of the twenty-one police stations in LA county, and the area "
+            "(represented as a circle) each covers."
         ),
     },
     {
@@ -186,9 +203,9 @@ LEGEND_ENTRIES = [
         "color": "#000000",
         "shape": "triangle",
         "label": "Homeless shelters (2025 HIC)",
+        "link": "https://www.lahsa.org/documents?id=9369-housing-inventory-count-hic-.xlsx",
         "description": (
-            "HUD Housing Inventory Count shelter locations. "
-            "Coordinates are city-level centroids."
+            "The location of all homeless shelters open during the 2025 Housing Inventory Count."
         ),
     },
 ]
@@ -281,6 +298,7 @@ class PrecinctMarker:
     suspect_count: int
     yearly_victim: int
     yearly_suspect: int
+    qct_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -323,6 +341,7 @@ class MyLA311Layer(MapLayer):
         df = pd.read_csv(
             path,
             usecols=["RequestType", "Latitude", "Longitude", "CreatedDate", "ClosedDate", "Anonymous", "PolicePrecinct"],
+            engine="python",
         )
         df = df[df["RequestType"] == MYLA311_REQUEST_TYPE]
         df = df.dropna(subset=["Latitude", "Longitude", "CreatedDate"])
@@ -470,6 +489,7 @@ class PrecinctLayer:
             int(row.PREC): (float(row.lat), float(row.lon), str(row.DIVISION), float(row.Shape__Area))
             for row in precincts.itertuples(index=False)
         }
+        qct_counts = _load_qct_counts()
 
         nibrs = pd.read_csv(nibrs_path, low_memory=False)
         nibrs = nibrs.dropna(subset=["Date OCC", "AREA"])
@@ -514,6 +534,7 @@ class PrecinctLayer:
                     suspect_count=day_counts.get(prec, (0, 0))[1],
                     yearly_victim=yearly_totals.get(prec, (0, 0))[0],
                     yearly_suspect=yearly_totals.get(prec, (0, 0))[1],
+                    qct_count=qct_counts.get(prec, 0),
                 )
                 for prec, (lat, lon, name, area) in loc.items()
             ]
@@ -664,6 +685,11 @@ def _traces_for_markers(
     ]
 
 
+def _load_qct_counts() -> dict[int, int]:
+    df = pd.read_csv(QCT_BY_PREC_PATH)
+    return dict(zip(df["PREC"].astype(int), df["qct_count"].astype(int)))
+
+
 def _circle_polygon(
     lat: float, lon: float, area_sqft: float, n: int = 16
 ) -> tuple[list[float], list[float]]:
@@ -705,12 +731,13 @@ def _traces_for_precincts(markers: list[PrecinctMarker]) -> list[go.Scattermap]:
                 marker=dict(size=6, color="#f59e0b", opacity=1.0),
                 showlegend=False,
                 legendgroup="precincts",
-                customdata=[[m.name, m.yearly_victim, m.yearly_suspect, m.victim_count + m.suspect_count]],
+                customdata=[[m.name, m.yearly_victim, m.yearly_suspect, m.victim_count + m.suspect_count, m.qct_count]],
                 hovertemplate=(
                     "Station: %{customdata[0]}<br>"
                     "Yearly homeless-victim crimes: %{customdata[1]}<br>"
                     "Yearly homeless-suspect crimes: %{customdata[2]}<br>"
-                    "Homeless-related crimes today: %{customdata[3]}<extra></extra>"
+                    "Homeless-related crimes today: %{customdata[3]}<br>"
+                    "QCT households (poverty level): %{customdata[4]}<extra></extra>"
                 ),
             )
         )
@@ -718,12 +745,12 @@ def _traces_for_precincts(markers: list[PrecinctMarker]) -> list[go.Scattermap]:
 
 
 DYNAMIC_LAYER_IDS = ["myla311", "lahsa-protocol", "lahsa-immediate", "lahsa-non-displacement"]
-# Trace index layout (fixed):
-#   0–3  : dynamic marker layers (myla311, 3×LAHSA) — updated every tick via Patch()
-#   4+j*2: precinct polygon fill for precinct j (shape static; hoverinfo=skip)
-#   5+j*2: precinct center dot for precinct j (customdata updated every tick via Patch())
-#   46   : shelter markers (fully static)
-_PRECINCT_POLY_START = len(DYNAMIC_LAYER_IDS)  # 4; dot for precinct j is at 4 + j*2 + 1
+# Trace index layout (fixed), bottom → top:
+#   0+j*2: precinct polygon fill for precinct j (shape static; hoverinfo=skip)
+#   1+j*2: precinct center dot for precinct j (customdata updated every tick via Patch())
+#   42   : shelter markers (fully static)
+#   43–46: dynamic marker layers (myla311, 3×LAHSA) — updated every tick via Patch()
+_PRECINCT_POLY_START = 0  # dot for precinct j is at j*2 + 1
 
 
 def _empty_marker_trace(layer: MapLayer) -> go.Scattermap:
@@ -774,7 +801,7 @@ def build_base_figure(
         dynamic_traces.append(t)
     precinct_traces = _traces_for_precincts(precinct_layer.markers_on(day))
     shelter_traces = _traces_for_shelters(shelter_layer.markers)
-    fig = go.Figure(dynamic_traces + precinct_traces + shelter_traces)
+    fig = go.Figure(precinct_traces + shelter_traces + dynamic_traces)
     fig.update_layout(
         map=dict(style=MAP_STYLE, center=MAP_CENTER, zoom=MAP_ZOOM),
         margin=dict(l=0, r=0, t=40, b=0),
@@ -816,7 +843,16 @@ def _legend_entry_row(entry: dict) -> html.Div:
             html.Div(marker_preview, style={"width": "28px", "flexShrink": "0"}),
             html.Div(
                 [
-                    html.Strong(entry["label"]),
+                    html.Strong(
+                        html.A(
+                            entry["label"],
+                            href=entry["link"],
+                            target="_blank",
+                            style={"color": "inherit", "textDecoration": "underline"},
+                        )
+                        if entry.get("link")
+                        else entry["label"]
+                    ),
                     html.Span(f" ({entry['marker']})", style={"color": "#666"}),
                     html.Div(entry["description"], style={"color": "#444", "marginTop": "2px"}),
                 ]
@@ -927,6 +963,9 @@ def build_app(
             return min(len(DATE_RANGE) - 1, day_idx + 1)
         return day_idx
 
+    # dynamic traces sit after all precinct traces (2 per station) + 1 shelter trace
+    _dyn_start = len(precinct_layer.markers_on(DATE_RANGE[0])) * 2 + 1
+
     @callback(
         Output("map", "figure"),
         Output("date-label", "children"),
@@ -936,21 +975,22 @@ def build_app(
         day = DATE_RANGE[day_idx]
         p = Patch()
         for i, layer in enumerate(layers):
+            idx = _dyn_start + i
             markers = index.get(day, layer.layer_id)
-            p["data"][i]["lat"] = [m.lat for m in markers]
-            p["data"][i]["lon"] = [m.lon for m in markers]
+            p["data"][idx]["lat"] = [m.lat for m in markers]
+            p["data"][idx]["lon"] = [m.lon for m in markers]
             if layer.layer_id == "myla311":
-                p["data"][i]["customdata"] = [
+                p["data"][idx]["customdata"] = [
                     [m.created_date, m.closed_date, m.precinct, m.anonymous] for m in markers
                 ]
             else:
-                p["data"][i]["customdata"] = [
+                p["data"][idx]["customdata"] = [
                     [m.created_date, m.closed_date, m.people, m.precinct] for m in markers
                 ]
         for j, pm in enumerate(precinct_layer.markers_on(day)):
             dot_idx = _PRECINCT_POLY_START + j * 2 + 1
             p["data"][dot_idx]["customdata"] = [
-                [pm.name, pm.yearly_victim, pm.yearly_suspect, pm.victim_count + pm.suspect_count]
+                [pm.name, pm.yearly_victim, pm.yearly_suspect, pm.victim_count + pm.suspect_count, pm.qct_count]
             ]
         p["layout"]["title"] = f"Encampment activity — {day.isoformat()}"
         return p, day.strftime("%B %d, %Y")
