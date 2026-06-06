@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from browser_use_sdk import AsyncBrowserUse
 
-from sites import SITES
+from scraping.sites import SITES
 
 load_dotenv()
 

@@ -11,7 +11,7 @@ WORKDIR $HOME/app
 COPY --chown=user requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY --chown=user map_builder.py app.py ./
+COPY --chown=user map/map_builder.py map/app.py ./
 
 COPY --chown=user \
     data/MyLA311/MyLA311_Service_Request_Homeless_Encampment_Combined_2025_20260524.csv \
