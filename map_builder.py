@@ -804,8 +804,7 @@ def build_base_figure(
     fig = go.Figure(precinct_traces + shelter_traces + dynamic_traces)
     fig.update_layout(
         map=dict(style=MAP_STYLE, center=MAP_CENTER, zoom=MAP_ZOOM),
-        margin=dict(l=0, r=0, t=40, b=0),
-        title=f"Encampment activity — {day.isoformat()}",
+        margin=dict(l=0, r=0, t=0, b=0),
         showlegend=True,
         uirevision="constant",
     )
@@ -907,6 +906,16 @@ def build_app(
 
     app.layout = html.Div(
         [
+            html.Div(
+                id="page-title",
+                children=f"Encampment activity — {DATE_RANGE[0].isoformat()}",
+                style={
+                    "textAlign": "center",
+                    "padding": "8px 0",
+                    "fontWeight": "600",
+                    "fontSize": "18px",
+                },
+            ),
             dcc.Graph(
                 id="map",
                 figure=initial_figure,
@@ -914,22 +923,34 @@ def build_app(
                 config={"scrollZoom": True},
             ),
             html.Div(id="date-label", style={"textAlign": "center", "padding": "4px"}),
-            dcc.Slider(
-                id="day-slider",
-                min=0,
-                max=len(DATE_RANGE) - 1,
-                step=1,
-                value=0,
-                tooltip=None,
-                marks={
-                    0: {
-                        "label": "Jan 1, 2025",
-                        "style": {"fontSize": "18px", "fontWeight": "600"},
-                    },
-                    len(DATE_RANGE) - 1: {
-                        "label": "Dec 31, 2025",
-                        "style": {"fontSize": "18px", "fontWeight": "600"},
-                    },
+            html.Div(
+                [
+                    html.Span(
+                        "Jan 1, 2025",
+                        style={"fontSize": "15px", "fontWeight": "600", "whiteSpace": "nowrap"},
+                    ),
+                    html.Div(
+                        dcc.Slider(
+                            id="day-slider",
+                            min=0,
+                            max=len(DATE_RANGE) - 1,
+                            step=1,
+                            value=0,
+                            tooltip=None,
+                            marks={},
+                        ),
+                        style={"flex": "1"},
+                    ),
+                    html.Span(
+                        "Dec 31, 2025",
+                        style={"fontSize": "15px", "fontWeight": "600", "whiteSpace": "nowrap"},
+                    ),
+                ],
+                style={
+                    "display": "flex",
+                    "alignItems": "center",
+                    "gap": "12px",
+                    "padding": "0 16px",
                 },
             ),
             html.Div(
@@ -969,9 +990,10 @@ def build_app(
     @callback(
         Output("map", "figure"),
         Output("date-label", "children"),
+        Output("page-title", "children"),
         Input("day-slider", "value"),
     )
-    def update_map(day_idx: int) -> tuple[Patch, str]:
+    def update_map(day_idx: int) -> tuple[Patch, str, str]:
         day = DATE_RANGE[day_idx]
         p = Patch()
         for i, layer in enumerate(layers):
@@ -992,8 +1014,8 @@ def build_app(
             p["data"][dot_idx]["customdata"] = [
                 [pm.name, pm.yearly_victim, pm.yearly_suspect, pm.victim_count + pm.suspect_count, pm.qct_count]
             ]
-        p["layout"]["title"] = f"Encampment activity — {day.isoformat()}"
-        return p, day.strftime("%B %d, %Y")
+        title = f"Encampment activity — {day.isoformat()}"
+        return p, day.strftime("%B %d, %Y"), title
 
     return app
 
