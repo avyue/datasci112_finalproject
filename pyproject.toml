@@ -1,7 +1,7 @@
 [project]
-name = "spring-break-2026"
+name = "datasci112-finalproject"
 version = "0.1.0"
-description = "Add your description here"
+description = "LA homeless encampment map and spatiotemporal modeling (DataSci 112 final project)"
 requires-python = ">=3.13"
 dependencies = [
     "beautifulsoup4>=4.14.3",

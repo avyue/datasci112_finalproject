@@ -12,5 +12,18 @@ wheels/
 # Environment variables
 .env
 
+# R and notebook artifacts
+.Rhistory
+Rplots.pdf
+*.nb.html
+
+# OS and editor
+.DS_Store
+data/.DS_Store
+.cursor/
+
+# Archived intermediate data (local copies only)
+data/archive/
+
 # Large data files (>100 MiB; git has no size-based ignore, so listed explicitly)
 data/MyLA311/NEWEST_MyLA311_Service_Request_Data_2025_20260524.csv

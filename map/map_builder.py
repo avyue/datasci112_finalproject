@@ -16,6 +16,8 @@ from dash import Input, Output, Patch, State, callback, dcc, html
 # --- constants ---
 
 DATA_DIR = Path(__file__).parent / "data"
+if not DATA_DIR.exists():
+    DATA_DIR = Path(__file__).parent.parent / "data"
 MYLA311_PATH = (
     DATA_DIR / "MyLA311" / "MyLA311_Service_Request_Homeless_Encampment_Combined_2025_20260524.csv"
 )
